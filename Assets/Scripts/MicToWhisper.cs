@@ -1,30 +1,42 @@
 using UnityEngine;
 using Whisper;
+using System.Linq;
+using System.Threading.Tasks;
+using TMPro;  // ← TextMeshPro を使うなら
 
 public class MicToWhisper : MonoBehaviour
 {
-    private AudioClip recordedClip;
-    private string micName;
-    private AudioSource audioSource;
-    private bool isRecording = false;
+    [Header("Whisper Manager")]
+    public WhisperManager whisperManager;   // シーン上の WhisperManagerObject をドラッグ
 
-    public WhisperManager whisperManager;
-    public string modelName = "for-tests-ggml-tiny.bin"; // StreamingAssetsに置いたファイル名
+    [Header("録音設定")]
+    public int recordSeconds = 10;           // 録音秒数
+    public int sampleRate   = 16000;         // Whisper 推奨 16kHz
+
+    [Header("UI")]
+    public TextMeshProUGUI transcriptText;   // Hierarchy の TranscriptText をドラッグ
+
+    private string    micName;
+    private AudioClip recordedClip;
+    private bool      isRecording = false;
+
+    async void Awake()
+    {
+        // Init On Awake にチェックが入っていればモデルは自動ロード済み
+        // 結果のセグメントを逐次コンソールにも表示
+        whisperManager.OnNewSegment += seg =>
+        {
+            Debug.Log($"[seg] {seg.Text}");
+        };
+    }
 
     void Start()
     {
-        audioSource = gameObject.AddComponent<AudioSource>();
-        whisperManager.Init(modelName);
-
+        // マイクデバイスを取得
         if (Microphone.devices.Length > 0)
-        {
             micName = Microphone.devices[0];
-            Debug.Log("マイク：" + micName);
-        }
         else
-        {
-            Debug.LogWarning("マイクが見つかりません！");
-        }
+            Debug.LogError("マイクが見つかりません。");
     }
 
     void Update()
@@ -32,30 +44,39 @@ public class MicToWhisper : MonoBehaviour
         // Rキーで録音開始
         if (Input.GetKeyDown(KeyCode.R) && !isRecording)
         {
-            Debug.Log("録音開始！");
-            recordedClip = Microphone.Start(micName, false, 10, 44100);
+            recordedClip = Microphone.Start(micName, false, recordSeconds, sampleRate);
             isRecording = true;
+            transcriptText.text = "Recording…";
+            Debug.Log("録音開始");
         }
 
-        // Sキーで録音終了 → Whisperへ送る
+        // Sキーで録音停止 → 文字起こし
         if (Input.GetKeyDown(KeyCode.S) && isRecording)
         {
             Microphone.End(micName);
             isRecording = false;
-            Debug.Log("録音終了、テキスト変換開始...");
-
-            audioSource.clip = recordedClip;
-            audioSource.Play(); // 確認用に再生
-
-            // Whisperで音声→テキスト変換（非同期）
-            whisperManager.Transcribe(recordedClip, OnTranscriptionComplete);
+            transcriptText.text = "Writing…";
+            Debug.Log("録音停止 → 文字起こし開始");
+            _ = TranscribeAsync();
         }
     }
 
-    // Whisper 変換完了時に呼ばれるコールバック
-    private void OnTranscriptionComplete(string result)
+    private async Task TranscribeAsync()
     {
-        Debug.Log("文字起こし結果: " + result);
-        // 必要があれば UI テキストに反映も可
+        var result = await whisperManager.GetTextAsync(recordedClip);
+        if (result == null)
+        {
+            Debug.LogError("Failed");
+            transcriptText.text = "失敗";
+            return;
+        }
+
+        // 各セグメントの Text をつなげて全文を取得
+        string full = string.Join(" ",
+            result.Segments.Select(s => s.Text)
+        );
+
+        Debug.Log("文字起こし結果: " + full);
+        transcriptText.text = full;
     }
 }
