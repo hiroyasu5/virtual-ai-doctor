@@ -32,3 +32,4 @@ Thumbs.db
 # crash reports
 sysinfo.txt
 server/.env
+server/.env
