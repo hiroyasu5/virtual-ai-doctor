@@ -1,3 +1,11 @@
+const express = require("express");
+const axios = require("axios");
+const dotenv = require("dotenv");
+
+dotenv.config();
+
+const app = express();
+app.use(express.json());
 // ✨ 新しい index.js にこのまま貼って使ってください
 app.post("/chat", async (req, res) => {
   const { messages, user_api_key } = req.body;
@@ -30,3 +38,7 @@ app.post("/chat", async (req, res) => {
   }
 });
 
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`✅ サーバー起動中 → http://localhost:${PORT}`);
+});
