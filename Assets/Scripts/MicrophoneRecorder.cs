@@ -22,12 +22,10 @@ public class MicrophoneRecorder : MonoBehaviour
 
     void Update()
     {
-        // R キーで録音開始
         if (Input.GetKeyDown(KeyCode.R) && !isRecording)
         {
             StartRecording();
         }
-        // S キーで録音停止
         if (Input.GetKeyDown(KeyCode.S) && isRecording)
         {
             StopRecording();
@@ -36,24 +34,37 @@ public class MicrophoneRecorder : MonoBehaviour
 
     void StartRecording()
     {
-        // デフォルトマイクで録音開始、ループしない、最大 maxRecordDuration 秒
         audioSource.clip = Microphone.Start(null, false, maxRecordDuration, sampleRate);
         isRecording = true;
-
-        // 録音が始まるまで待機
         while (!(Microphone.GetPosition(null) > 0)) { }
-        audioSource.Play();  // 録音中の音声をリアルタイム再生したい場合
+        audioSource.Play();
         Debug.Log("録音開始");
     }
 
     void StopRecording()
     {
-        Microphone.End(null);  // 録音停止
+        Microphone.End(null);
         isRecording = false;
-        audioSource.Stop();    // 再生も停止
+        audioSource.Stop();
+
         Debug.Log("録音停止");
 
-        // 録音データは audioSource.clip に保存されている
-        // 必要ならここでファイル出力などを行ってください
+        string path = Application.persistentDataPath + "/recorded.wav";
+        SaveAudioClipAsWav(audioSource.clip, path);
+        StartCoroutine(TranscribeAndRespond(path));
     }
-}
+
+    // ✅ ここが実際に .wav を保存する関数（クラスの中にある）
+    void SaveAudioClipAsWav(AudioClip clip, string path)
+    {
+        WavUtility.FromAudioClip(clip, path, true);
+        Debug.Log("WAVファイルを保存しました: " + path);
+    }
+
+    IEnumerator TranscribeAndRespond(string path)
+    {
+        Debug.Log("Transcribe from: " + path);
+        yield return null;
+    }
+}  // ←ここでクラスは終了
+
