@@ -246,6 +246,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   sampleRate: 44100
   maxRecordDuration: 10
+  serverBaseUrl: https://ai-relay-server.onrender.com
+  userApiKey: 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
 --- !u!82 &1504439896
 AudioSource:
   m_ObjectHideFlags: 0
