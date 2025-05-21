@@ -14,6 +14,9 @@ app.use(express.json());
 const upload = multer({ dest: "uploads/" });
 
 // ✅ Whisperエンドポイント（音声文字起こし）
+// server/index.js もしくは ルートの index.js
+// ────────────────────────────────────
+
 app.post("/transcribe", upload.single("audio"), async (req, res) => {
   const apiKey = req.body.user_api_key || process.env.OPENAI_API_KEY;
   const filePath = req.file.path;
@@ -22,15 +25,25 @@ app.post("/transcribe", upload.single("audio"), async (req, res) => {
 
   try {
     const formData = new FormData();
-    formData.append("file", fs.createReadStream(filePath));
+    // ← ここを修正
+    formData.append(
+      "file",
+      fs.createReadStream(filePath),
+      {
+        filename: req.file.originalname || "recorded.wav",
+        contentType: req.file.mimetype || "audio/wav"
+      }
+    );
     formData.append("model", "whisper-1");
 
-    const response = await axios.post("https://api.openai.com/v1/audio/transcriptions", formData, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        ...formData.getHeaders(),
-      },
-    });
+    const response = await axios.post(
+      "https://api.openai.com/v1/audio/transcriptions",
+      formData,
+      { headers: { 
+          Authorization: `Bearer ${apiKey}`,
+          ...formData.getHeaders()
+      } }
+    );
 
     fs.unlinkSync(filePath);
     res.json({ text: response.data.text });
@@ -39,6 +52,7 @@ app.post("/transcribe", upload.single("audio"), async (req, res) => {
     res.status(500).json({ error: "Whisper文字起こし失敗" });
   }
 });
+
 
 // ✅ ChatGPTエンドポイント（チャット）
 app.post("/chat", async (req, res) => {
@@ -74,3 +88,4 @@ app.post("/chat", async (req, res) => {
 app.listen(port, () => {
   console.log(`✅ サーバー起動中 → http://localhost:${port}`);
 });
+
