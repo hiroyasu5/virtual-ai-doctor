@@ -1,11 +1,10 @@
 # voicevox-engine/Dockerfile
 FROM voicevox/voicevox_engine:latest
 
-# Render が割り当ててくれるポートを環境変数 ENGINE_PORT にセット
-ENV ENGINE_PORT $PORT
+# Render が渡してくる PORT 環境変数をそのまま使う
+# （デフォルト 50021 も同じだから、冗長に ENGINE_PORT を作らなくても大丈夫）
+EXPOSE $PORT
 
-# そのポートを公開
-EXPOSE ${ENGINE_PORT}
-
-# ★ CMD を意図的に書かない（公式イメージの ENTRYPOINT が動きます）
+# 最終行でこのコンテナを起動。必ず $PORT で待ち受ける
+CMD ["bash","-lc","uvicorn --host 0.0.0.0 --port $PORT voicevox_engine.app:app"]
 

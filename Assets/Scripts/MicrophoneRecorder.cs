@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.Networking;
 using System.Collections;
 using System.IO;
+using System.Text;   // ← これを追加
 
 public class MicrophoneRecorder : MonoBehaviour
 {
@@ -18,21 +19,23 @@ public class MicrophoneRecorder : MonoBehaviour
     [Tooltip("自分の APIキーを送信したい場合")]
     public string userApiKey = "";   // 空文字ならサーバー側の環境変数を使います
 
+    [Header("Voicevox エンジン設定")]
+    [Tooltip("Voicevox Engine が動いている URL")]
+    public string voicevoxBaseUrl = "https://docter1-3.onrender.com";  // ← 自分の Voicevox サービス URL
+    [Tooltip("冥鳴ひまり の speaker ID (例:14)")]
+    public int voicevoxSpeakerId = 14;
+
     void Start()
     {
-        // AudioSource がなければ追加
-        audioSource = GetComponent<AudioSource>();
-        if (audioSource == null)
-            audioSource = gameObject.AddComponent<AudioSource>();
+        audioSource = GetComponent<AudioSource>() 
+                      ?? gameObject.AddComponent<AudioSource>();
     }
 
     void Update()
     {
-        // Rキーで録音開始
         if (Input.GetKeyDown(KeyCode.R) && !isRecording)
             StartCoroutine(StartRecording());
 
-        // Sキーで録音停止
         if (Input.GetKeyDown(KeyCode.S) && isRecording)
             StopRecording();
     }
@@ -41,11 +44,8 @@ public class MicrophoneRecorder : MonoBehaviour
     {
         audioSource.clip = Microphone.Start(null, false, maxRecordDuration, sampleRate);
         isRecording = true;
-
-        // 録音スタート待ち
         while (Microphone.GetPosition(null) <= 0)
             yield return null;
-
         audioSource.Play();
         Debug.Log("録音開始");
     }
@@ -57,28 +57,15 @@ public class MicrophoneRecorder : MonoBehaviour
         audioSource.Stop();
         Debug.Log("録音停止");
 
-        // WAV を保存して…
+        // 録音データを保存
         string filePath = Path.Combine(Application.persistentDataPath, "recorded.wav");
-        SaveAudioClipAsWav(audioSource.clip, filePath);
+        byte[] wavData = WavUtility.FromAudioClip(audioSource.clip);
+        File.WriteAllBytes(filePath, wavData);
         Debug.Log("WAVファイル保存完了: " + filePath);
 
-        // サーバーへ送信して文字起こし＆ChatGPT
+        // Whisper → ChatGPT → Voicevox の一連フロー
         StartCoroutine(UploadAndTranscribe(filePath));
     }
-
-    void SaveAudioClipAsWav(AudioClip clip, string path)
-    {
-        if (clip == null)
-        {
-            Debug.LogError("録音データがありません");
-            return;
-        }
-        // byte[] 版を呼び出して自分で書き出し
-        byte[] wavData = WavUtility.FromAudioClip(clip);
-        File.WriteAllBytes(path, wavData);
-    }
-
-    // ────────────── ここから追加部分 ──────────────
 
     IEnumerator UploadAndTranscribe(string filePath)
     {
@@ -88,7 +75,7 @@ public class MicrophoneRecorder : MonoBehaviour
             yield break;
         }
 
-        // Whisper 用フォーム
+        // Whisper へ送信
         byte[] bytes = File.ReadAllBytes(filePath);
         WWWForm form = new WWWForm();
         form.AddBinaryData("audio", bytes, "recorded.wav", "audio/wav");
@@ -102,7 +89,6 @@ public class MicrophoneRecorder : MonoBehaviour
             if (www.result != UnityWebRequest.Result.Success)
             {
                 Debug.LogError("文字起こし失敗: " + www.error);
-                Debug.LogError("レスポンス: " + www.downloadHandler.text);
                 yield break;
             }
 
@@ -122,8 +108,8 @@ public class MicrophoneRecorder : MonoBehaviour
         string json = JsonUtility.ToJson(chatReq);
 
         var req = new UnityWebRequest(serverBaseUrl.TrimEnd('/') + "/chat", "POST");
-        byte[] body = System.Text.Encoding.UTF8.GetBytes(json);
-        req.uploadHandler = new UploadHandlerRaw(body);
+        byte[] body = Encoding.UTF8.GetBytes(json);
+        req.uploadHandler   = new UploadHandlerRaw(body);
         req.downloadHandler = new DownloadHandlerBuffer();
         req.SetRequestHeader("Content-Type", "application/json");
 
@@ -131,7 +117,6 @@ public class MicrophoneRecorder : MonoBehaviour
         if (req.result != UnityWebRequest.Result.Success)
         {
             Debug.LogError("ChatGPT リクエスト失敗: " + req.error);
-            Debug.LogError("レスポンス: " + req.downloadHandler.text);
             yield break;
         }
 
@@ -139,30 +124,52 @@ public class MicrophoneRecorder : MonoBehaviour
         string reply = respC.choices[0].message.content;
         Debug.Log("🤖 ChatGPT 返答: " + reply);
 
-        // ▶︎ ここで reply を画面 UI や VoiceVox などに渡す
+        // ここで Voicevox に渡す
+        yield return StartCoroutine(GenerateVoice(reply));
     }
 
-    [System.Serializable]
-    private class TranscribeResponse { public string text; }
-
-    [System.Serializable]
-    private class ChatRequest
+    IEnumerator GenerateVoice(string text)
     {
-        public ChatMessage[] messages;
-        public string user_api_key;
+        // 1) audio_query
+        string qUrl = $"{voicevoxBaseUrl.TrimEnd('/')}/audio_query" +
+                      $"?text={UnityWebRequest.EscapeURL(text)}" +
+                      $"&speaker={voicevoxSpeakerId}";
+        using (var qReq = UnityWebRequest.Get(qUrl))
+        {
+            yield return qReq.SendWebRequest();
+            if (qReq.result != UnityWebRequest.Result.Success)
+            {
+                Debug.LogError("Voicevox /audio_query エラー: " + qReq.error);
+                yield break;
+            }
+            string queryJson = qReq.downloadHandler.text;
+
+            // 2) synthesis
+            string sUrl = $"{voicevoxBaseUrl.TrimEnd('/')}/synthesis?speaker={voicevoxSpeakerId}";
+            var sReq = new UnityWebRequest(sUrl, "POST");
+            byte[] body = Encoding.UTF8.GetBytes(queryJson);
+            sReq.uploadHandler   = new UploadHandlerRaw(body);
+            sReq.downloadHandler = new DownloadHandlerBuffer();
+            sReq.SetRequestHeader("Content-Type", "application/json");
+            yield return sReq.SendWebRequest();
+
+            if (sReq.result != UnityWebRequest.Result.Success)
+            {
+                Debug.LogError("Voicevox /synthesis エラー: " + sReq.error);
+                yield break;
+            }
+
+            // 3) 再生
+            byte[] wavBytes = sReq.downloadHandler.data;
+            AudioClip clip = WavUtility.ToAudioClip(wavBytes, 0, "voicevox");
+            audioSource.clip = clip;
+            audioSource.Play();
+        }
     }
 
-    [System.Serializable]
-    private class ChatMessage
-    {
-        public string role;
-        public string content;
-    }
-
-    [System.Serializable]
-    private class ChatResponse { public Choice[] choices; }
-    [System.Serializable]
-    private class Choice { public ChatMessage message; }
+    [System.Serializable] private class TranscribeResponse { public string text; }
+    [System.Serializable] private class ChatRequest { public ChatMessage[] messages; public string user_api_key; }
+    [System.Serializable] private class ChatMessage { public string role; public string content; }
+    [System.Serializable] private class ChatResponse { public Choice[] choices; }
+    [System.Serializable] private class Choice { public ChatMessage message; }
 }
-
-
