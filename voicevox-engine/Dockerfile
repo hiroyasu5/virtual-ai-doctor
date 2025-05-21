@@ -1,15 +1,12 @@
- # voicevox-engine/Dockerfile
- FROM voicevox/voicevox_engine:latest
+# ← プロジェクトルート直下に置く Dockerfile
 
--# Render から渡されるドア番号(PORT)をそのまま開ける
--EXPOSE $PORT
--
--# uvicorn を直接呼ぼうとすると見つからないケースがあるので、
--# Python3 にモジュールとして実行させる
--CMD ["bash","-lc","uvicorn --host 0.0.0.0 --port $PORT voicevox_engine.app:app"]
-+## Render から渡されるドア番号(PORT)をそのまま開ける
-+EXPOSE $PORT
-+
-+# Python3 でモジュールとして uvicorn を起動させる
-+CMD ["bash","-lc","python3 -m uvicorn --host 0.0.0.0 --port $PORT voicevox_engine.app:app"]
+# 公式 Voicevox Engine イメージをベースに使う
+FROM voicevox/voicevox_engine:latest
+
+# Render が渡してくる PORT 環境変数をそのまま開放
+EXPOSE $PORT
+
+# Python3 モジュールとして Uvicorn を起動。必ず $PORT で待ち受ける
+CMD ["bash", "-lc", "python3 -m uvicorn --host 0.0.0.0 --port $PORT voicevox_engine.app:app"]
+
 
