@@ -1,11 +1,9 @@
-# 1) ベースイメージは公式 Voicevox エンジン
-FROM voicevox/voicevox_engine:latest
+# voicevox-engine/Dockerfile
+FROM voicevox/voicevox_engine:latest          # ① 公式イメージ
 
-# 2) Render がくれる $PORT をそのまま開放
-EXPOSE $PORT
+EXPOSE $PORT                                  # ② Render が渡すポートを公開
 
-# 3) シェル経由で uvicorn を呼び出す
-#    └ ベースイメージには uvicorn が install されている想定
-CMD ["bash", "-lc", "uvicorn --host 0.0.0.0 --port $PORT voicevox_engine.app:app"]
+CMD ["bash","-lc","python -m voicevox_engine --host 0.0.0.0 --port $PORT"]  # ③ 起動
+
 
 
