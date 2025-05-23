@@ -33,3 +33,8 @@ Thumbs.db
 sysinfo.txt
 server/.env
 server/.env
+# 環境変数ファイルを無視
+.env
+
+# Node.js の依存モジュールを無視
+node_modules/

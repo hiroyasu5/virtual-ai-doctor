@@ -1,0 +1,10 @@
+[
+  {
+    "name": "start_realtime",
+    "description": "リアルタイム音声会話を開始する",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
+  }
+]
