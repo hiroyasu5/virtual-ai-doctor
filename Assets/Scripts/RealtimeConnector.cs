@@ -26,36 +26,29 @@ public class RealtimeConnector : MonoBehaviour
     {
         Debug.Log("StartRealtime() 呼び出し");
 
-        // 新しい WebSocket を生成
         ws = new WebSocket(wsUrl);
 
-        // 接続成功
         ws.OnOpen += (s, e) =>
         {
             Debug.Log("WebSocket opened");
             if (statusText) statusText.text = "接続: オープン";
         };
 
-        // 接続切断
         ws.OnClose += (s, e) =>
         {
             Debug.Log("WebSocket closed");
             if (statusText) statusText.text = "接続: クローズ";
         };
 
-        // エラー発生時
         ws.OnError += (s, e) =>
         {
-            // 切断済み or 未接続なら無視
             if (ws == null || !ws.IsAlive) return;
             Debug.LogError("WebSocket error: " + e.Message);
             if (statusText) statusText.text = "エラー: " + e.Message;
         };
 
-        // メッセージ受信時
         ws.OnMessage += (s, e) =>
         {
-            // 切断済み or 未接続なら無視
             if (ws == null || !ws.IsAlive) return;
             Debug.Log($"Received {e.RawData.Length} bytes");
             var clip = WavUtility.ToAudioClip(e.RawData, 1, "realtime");
@@ -72,12 +65,11 @@ public class RealtimeConnector : MonoBehaviour
     public void StopRealtime()
     {
         Debug.Log("StopRealtime() 呼び出し");
-        // 送信ループを止めるフラグを倒す
         isSending = false;
 
         if (ws != null)
         {
-            // イベントハンドラを解除してから切断
+            // イベントハンドラを解除
             ws.OnOpen    -= null;
             ws.OnClose   -= null;
             ws.OnError   -= null;
@@ -86,7 +78,6 @@ public class RealtimeConnector : MonoBehaviour
             if (ws.IsAlive)
                 ws.Close();
 
-            // 参照クリア
             ws = null;
         }
     }
@@ -94,8 +85,23 @@ public class RealtimeConnector : MonoBehaviour
     private IEnumerator CaptureAndSend()
     {
         Debug.Log("CaptureAndSend 開始");
-        // マイク録音を開始 (1sec ループ, 16kHz)
+
+        // ◆ エディター上ではマイク操作をスキップ
+        #if UNITY_EDITOR
+        Debug.LogWarning("エディター環境ではマイク入力をスキップします");
+        yield break;
+        #endif
+
+        // 実機ビルド向け：マイクデバイスがなければ中断
+        if (Microphone.devices == null || Microphone.devices.Length == 0)
+        {
+            Debug.LogWarning("マイクが見つかりません。CaptureAndSend を中断します。");
+            yield break;
+        }
+
+        // マイク録音を開始 (1秒ループ, 16kHz)
         micClip = Microphone.Start(null, true, 1, micSampleRate);
+
         int lastPos = 0;
         isSending = true;
 
@@ -103,22 +109,17 @@ public class RealtimeConnector : MonoBehaviour
         {
             yield return null;
 
-            // 切断済み or 未接続なら即ループ脱出
             if (ws == null || !ws.IsAlive)
                 break;
 
             int pos = Microphone.GetPosition(null);
             if (pos > lastPos)
             {
-                // 新規サンプルだけ取得
                 var samples = new float[pos - lastPos];
                 micClip.GetData(samples, lastPos);
                 lastPos = pos;
 
-                // PCM16bit バイト列に変換
                 byte[] bytes = WavUtility.FromAudioClipSegment(samples, micSampleRate);
-
-                // 送信
                 try
                 {
                     ws.Send(bytes);
@@ -136,4 +137,5 @@ public class RealtimeConnector : MonoBehaviour
         Microphone.End(null);
         Debug.Log("CaptureAndSend 終了");
     }
-}
+
+} // ← ここがクラスの閉じ括弧です
