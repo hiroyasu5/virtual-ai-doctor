@@ -2072,7 +2072,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 14558e4aaaaf0b6aeae288d911aa8735, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  wsUrl: ws://localhost:8000/ws/realtime
+  wsUrl: wss://1abb-202-223-144-130.ngrok-free.app/ws/realtime
   statusText: {fileID: 2012517811}
 --- !u!4 &1068007015
 Transform:
