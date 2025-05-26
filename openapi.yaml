@@ -1,0 +1,175 @@
+openapi: 3.0.3
+info:
+  title: Virtual AI Doctor - Realtime API
+  description: |
+    OpenAI Realtime APIを使用したリアルタイム音声医療アシスタントシステム。
+    
+    **主な機能:**
+    - リアルタイム音声通信 (WebSocket)
+    - OpenAI GPT-4oとの音声対話
+    - 将来的なFunction Calling対応（医療検索、画像解析等）
+    
+    **WebSocket音声フォーマット:**
+    - 送信: PCM16, 24kHz, モノラル, 50msチャンク
+    - 受信: OpenAI音声データ（バイナリ）
+    
+  version: 1.0.0
+  contact:
+    name: Virtual AI Doctor Team
+  license:
+    name: MIT
+
+servers:
+  - url: http://127.0.0.1:8000
+    description: Development server
+  - url: https://your-production-domain.com
+    description: Production server
+
+paths:
+  /health:
+    get:
+      summary: ヘルスチェック
+      description: サーバーの稼働状況を確認
+      tags:
+        - Health
+      responses:
+        '200':
+          description: サーバー正常動作
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "healthy"
+                  service:
+                    type: string
+                    example: "realtime-audio-relay"
+                  timestamp:
+                    type: string
+                    format: date-time
+                    example: "2025-05-26T10:30:00Z"
+
+  /ws/audio:
+    get:
+      summary: リアルタイム音声WebSocket
+      description: |
+        OpenAI Realtime APIとのリアルタイム音声通信用WebSocketエンドポイント。
+        
+        **プロトコル:**
+        1. WebSocket接続確立
+        2. クライアント→サーバー: PCM16音声データ（50msチャンク）
+        3. サーバー→クライアント: OpenAI音声レスポンス（バイナリ）
+        
+        **将来のFunction Call対応:**
+        - `search_medical`: 医療情報検索
+        - `analyze_image`: 医療画像解析
+        - `patient_lookup`: 患者情報検索
+        
+      tags:
+        - WebSocket
+      parameters:
+        - name: Connection
+          in: header
+          required: true
+          schema:
+            type: string
+            enum: [Upgrade]
+        - name: Upgrade
+          in: header
+          required: true
+          schema:
+            type: string
+            enum: [websocket]
+      responses:
+        '101':
+          description: WebSocket接続確立
+        '400':
+          description: 不正なWebSocketリクエスト
+        '401':
+          description: 認証エラー（将来実装予定）
+        '500':
+          description: OpenAI API接続エラー
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - service
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+          description: サーバー状態
+        service:
+          type: string
+          description: サービス名
+        timestamp:
+          type: string
+          format: date-time
+          description: レスポンス生成時間
+        version:
+          type: string
+          description: APIバージョン
+          example: "1.0.0"
+    
+    WebSocketMessage:
+      type: object
+      description: WebSocket経由で送受信されるメッセージ形式（参考用）
+      oneOf:
+        - $ref: '#/components/schemas/AudioChunk'
+        - $ref: '#/components/schemas/FunctionCall'
+        - $ref: '#/components/schemas/TranscriptMessage'
+    
+    AudioChunk:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [audio]
+        data:
+          type: string
+          format: binary
+          description: PCM16音声データ（Base64エンコード）
+        sample_rate:
+          type: integer
+          default: 24000
+        channels:
+          type: integer
+          default: 1
+    
+    FunctionCall:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [function_call]
+        name:
+          type: string
+          enum: [search_medical, analyze_image, patient_lookup]
+        arguments:
+          type: object
+          description: 関数の引数（関数により異なる）
+    
+    TranscriptMessage:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [transcript]
+        content:
+          type: string
+          description: 音声認識結果テキスト
+        confidence:
+          type: number
+          format: float
+          description: 認識信頼度（0.0-1.0）
+
+tags:
+  - name: Health
+    description: サーバー状態監視
+  - name: WebSocket
+    description: リアルタイム音声通信
