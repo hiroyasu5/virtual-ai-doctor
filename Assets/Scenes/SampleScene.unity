@@ -1188,7 +1188,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &2016107872
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1289,6 +1289,10 @@ PrefabInstance:
       propertyPath: audioSource
       value: 
       objectReference: {fileID: 470436047}
+    - target: {fileID: 4916697400483437150, guid: 189c9216aea523e098c976165bddb33d, type: 3}
+      propertyPath: showDebugLog
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 5680591287435041070, guid: 189c9216aea523e098c976165bddb33d, type: 3}
       propertyPath: m_LocalPosition.x
       value: 1.6431865
@@ -1341,11 +1345,26 @@ PrefabInstance:
       propertyPath: avatarAnimator
       value: 
       objectReference: {fileID: 1108570461}
+    - target: {fileID: 8600748095823823768, guid: 189c9216aea523e098c976165bddb33d, type: 3}
+      propertyPath: webSocketManager
+      value: 
+      objectReference: {fileID: 9198166244049670055}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 189c9216aea523e098c976165bddb33d, type: 3}
+--- !u!114 &9198166244049670055 stripped
+MonoBehaviour:
+  m_CorrespondingSourceObject: {fileID: 108691071932349187, guid: 189c9216aea523e098c976165bddb33d, type: 3}
+  m_PrefabInstance: {fileID: 9198166244049670054}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d8cd9793668941d47bc9009f0e0453ee, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
