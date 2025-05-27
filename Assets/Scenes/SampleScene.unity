@@ -1081,7 +1081,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 347b6ae1470280324a48bd32ff82cc3d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  audioSource: {fileID: 0}
+  audioSource: {fileID: 470436047}
   faceRenderer: {fileID: 1891778258}
   blendShapeNames:
   - Fcl_MTH_A

@@ -29,7 +29,12 @@ virtual-ai-doctor/
 │   ├── requirements.txt       # Python依存関係
 │   └── .env.sample           # 環境変数テンプレート
 ├── Unity/                     # Unityクライアント
-│   └── DoctorDemo.unity      # デモシーン
+│   ├── Assets/Scripts/       # Unity音声システム
+│   │   ├── VoiceSystemController.cs  # メイン制御
+│   │   ├── WebSocketManager.cs       # WebSocket通信
+│   │   ├── AudioManager.cs          # 音声処理
+│   │   └── AudioConverter.cs        # PCM16変換
+│   └── SampleScene.unity    # VRoidアバター音声チャット
 └── docs/                     # ドキュメント
     ├── setup.md              # セットアップ手順
     └── adr/                  # Architecture Decision Records
@@ -82,6 +87,31 @@ curl http://127.0.0.1:8000/health
 | `/docs` | GET | API仕様書（自動生成） | Swagger UI |
 
 ## 🔧 Configuration
+
+## 📊 Current Status
+**MVP Progress: 7.5/10 (75% Complete)**
+
+### ✅ Completed
+- FastAPI WebSocket server with OpenAI Realtime API integration
+- Unity WebSocket client with real-time audio processing
+- VRoid avatar integration with UI components
+- Mobile-responsive interface (portrait mode optimized)
+
+### 🚧 In Progress  
+- Audio recording/playback functionality testing
+- OpenAI voice response integration
+- Avatar animation synchronization
+
+### ⏭ Next Steps
+- Complete end-to-end voice conversation testing
+- Implement IsTalking animation parameters
+- Mobile device deployment testing
+
+### 音声設定
+- **Sample Rate**: 16kHz (OpenAI Realtime API推奨)
+- **Audio Format**: PCM16 Little Endian
+- **Chunk Size**: 50ms for low-latency streaming
+- **Supported Platforms**: Windows, macOS, Android, iOS
 
 ### 必要な環境変数 (.env)
 ```env

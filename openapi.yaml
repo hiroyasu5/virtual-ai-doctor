@@ -19,10 +19,11 @@ info:
   license:
     name: MIT
 
+# 修正後（プロダクション用URLを更新する場合）
 servers:
   - url: http://127.0.0.1:8000
-    description: Development server
-  - url: https://your-production-domain.com
+    description: Development server  
+  - url: https://virtual-ai-doctor.com  # ← プロジェクト名に合わせて
     description: Production server
 
 paths:

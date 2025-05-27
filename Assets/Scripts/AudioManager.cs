@@ -5,12 +5,12 @@ using UnityEngine;
 /// <summary>
 /// 音声録音・再生を管理するクラス
 /// マイク音声 → PCM16変換 → チャンク送信
-/// 受信音声 → AudioClip変換 → 再生
+/// 受信音声 → AudioClip変換 → 連続再生
 /// </summary>
 public class AudioManager : MonoBehaviour
 {
     [Header("音声設定")]
-    [SerializeField] private int sampleRate = 24000; // OpenAI Realtime API推奨
+    [SerializeField] private int sampleRate = 16000; // ✅ OpenAI Realtime API標準仕様
     [SerializeField] private float chunkDurationMs = 50f; // 50msチャンク
     [SerializeField] private int recordingLength = 10; // 循環バッファ長(秒)
     
@@ -25,6 +25,13 @@ public class AudioManager : MonoBehaviour
     private string microphoneDevice;
     private bool isRecording = false;
     private Coroutine recordingCoroutine;
+    
+    // 🎵 音声再生バッファ（リングバッファ方式）
+    private AudioClip streamingClip;
+    private float[] audioBuffer;
+    private int bufferWritePosition = 0;
+    private int bufferSize;
+    private bool isStreaming = false;
     
     // 音声チャンク送信イベント
     public event Action<byte[]> OnAudioChunkReady;
@@ -46,6 +53,9 @@ public class AudioManager : MonoBehaviour
                 audioSource = gameObject.AddComponent<AudioSource>();
             }
         }
+        
+        // ✅ ストリーミング音声バッファ初期化
+        InitializeStreamingBuffer();
     }
     
     private void Start()
@@ -56,6 +66,86 @@ public class AudioManager : MonoBehaviour
     private void OnDestroy()
     {
         StopRecording();
+        StopStreaming();
+    }
+    
+    #endregion
+    
+    #region ストリーミング音声バッファ
+    
+    /// <summary>
+    /// ストリーミング音声バッファの初期化
+    /// </summary>
+    private void InitializeStreamingBuffer()
+    {
+        // 3秒分のバッファを用意（16kHz × 3秒）
+        bufferSize = sampleRate * 3;
+        audioBuffer = new float[bufferSize];
+        
+        // ストリーミング用AudioClip作成
+        streamingClip = AudioClip.Create(
+            "StreamingAudio",
+            bufferSize,
+            1, // モノラル
+            sampleRate,
+            true, // ストリーミング
+            OnAudioRead
+        );
+        
+        LogDebug($"ストリーミングバッファ初期化: {bufferSize} samples ({bufferSize / (float)sampleRate:F1}秒)");
+    }
+    
+    /// <summary>
+    /// AudioClipストリーミング用コールバック
+    /// </summary>
+    /// <param name="data">出力音声データ</param>
+    private void OnAudioRead(float[] data)
+    {
+        if (!isStreaming || audioBuffer == null)
+        {
+            // 無音で埋める
+            for (int i = 0; i < data.Length; i++)
+            {
+                data[i] = 0f;
+            }
+            return;
+        }
+        
+        // リングバッファから音声データを読み取り
+        for (int i = 0; i < data.Length; i++)
+        {
+            int readPosition = (bufferWritePosition - data.Length + i + bufferSize) % bufferSize;
+            data[i] = audioBuffer[readPosition];
+        }
+    }
+    
+    /// <summary>
+    /// ストリーミング開始
+    /// </summary>
+    private void StartStreaming()
+    {
+        if (!isStreaming && streamingClip != null)
+        {
+            isStreaming = true;
+            audioSource.clip = streamingClip;
+            audioSource.loop = true;
+            audioSource.Play();
+            LogDebug("ストリーミング音声開始");
+        }
+    }
+    
+    /// <summary>
+    /// ストリーミング停止
+    /// </summary>
+    private void StopStreaming()
+    {
+        if (isStreaming)
+        {
+            isStreaming = false;
+            audioSource.Stop();
+            audioSource.clip = null;
+            LogDebug("ストリーミング音声停止");
+        }
     }
     
     #endregion
@@ -165,7 +255,8 @@ public class AudioManager : MonoBehaviour
         int samplesPerChunk = Mathf.RoundToInt(sampleRate * (chunkDurationMs / 1000f));
         float waitTime = chunkDurationMs / 1000f;
         
-        LogDebug($"チャンク送信開始 - サンプル/チャンク: {samplesPerChunk}, 間隔: {waitTime:F3}秒");
+        // ✅ 16kHz × 50ms = 800サンプル × 2bytes = 1600 bytes期待
+        LogDebug($"チャンク送信開始 - サンプル/チャンク: {samplesPerChunk}, 期待バイト数: {samplesPerChunk * 2}, 間隔: {waitTime:F3}秒");
         
         while (isRecording && microphoneClip != null)
         {
@@ -188,13 +279,13 @@ public class AudioManager : MonoBehaviour
                 // 新しいサンプルを処理
                 if (currentSample > lastSample)
                 {
-                    int availanceSamples = currentSample - lastSample;
+                    int availableSamples = currentSample - lastSample;
                     
-                    while (availanceSamples >= samplesPerChunk)
+                    while (availableSamples >= samplesPerChunk)
                     {
                         ProcessAudioChunk(lastSample, samplesPerChunk);
                         lastSample += samplesPerChunk;
-                        availanceSamples -= samplesPerChunk;
+                        availableSamples -= samplesPerChunk;
                     }
                 }
             }
@@ -227,7 +318,7 @@ public class AudioManager : MonoBehaviour
             {
                 // イベント通知で送信
                 OnAudioChunkReady?.Invoke(pcmData);
-                LogDebug($"音声チャンク送信: {pcmData.Length} bytes");
+                LogDebug($"音声チャンク送信: {pcmData.Length} bytes"); // 1600 bytes期待
             }
         }
         catch (Exception e)
@@ -292,7 +383,7 @@ public class AudioManager : MonoBehaviour
     #region 音声再生
     
     /// <summary>
-    /// 受信した音声データを再生
+    /// 受信した音声データを再生（ストリーミング方式）
     /// </summary>
     public void PlayReceivedAudio(byte[] audioData)
     {
@@ -304,50 +395,43 @@ public class AudioManager : MonoBehaviour
         
         try
         {
-            // PCM16データをAudioClipに変換
-            AudioClip clip = CreateAudioClipFromPCM16(audioData);
+            // PCM16データをfloat配列に変換
+            float[] samples = ConvertFromPCM16(audioData);
             
-            if (clip != null && audioSource != null)
+            if (samples.Length == 0)
             {
-                audioSource.PlayOneShot(clip);
-                LogDebug($"音声再生: 長さ{clip.length:F2}秒");
+                return;
             }
+            
+            // ✅ ストリーミングバッファに書き込み
+            WriteToStreamingBuffer(samples);
+            
+            // ストリーミング開始（初回のみ）
+            if (!isStreaming)
+            {
+                StartStreaming();
+            }
+            
+            LogDebug($"音声ストリーミング: {samples.Length} samples, {audioData.Length} bytes");
         }
         catch (Exception e)
         {
-            LogError($"音声再生エラー: {e.Message}");
+            LogError($"音声재생エラー: {e.Message}");
         }
     }
     
     /// <summary>
-    /// PCM16データからAudioClipを作成
+    /// ストリーミングバッファに音声データを書き込み
     /// </summary>
-    private AudioClip CreateAudioClipFromPCM16(byte[] pcmData)
+    private void WriteToStreamingBuffer(float[] samples)
     {
-        try
+        if (audioBuffer == null || samples == null)
+            return;
+        
+        for (int i = 0; i < samples.Length; i++)
         {
-            float[] samples = ConvertFromPCM16(pcmData);
-            
-            if (samples.Length == 0)
-            {
-                return null;
-            }
-            
-            AudioClip clip = AudioClip.Create(
-                name: $"ReceivedAudio_{DateTime.Now.Ticks}",
-                lengthSamples: samples.Length,
-                channels: 1, // モノラル
-                frequency: sampleRate,
-                stream: false
-            );
-            
-            clip.SetData(samples, 0);
-            return clip;
-        }
-        catch (Exception e)
-        {
-            LogError($"AudioClip作成エラー: {e.Message}");
-            return null;
+            audioBuffer[bufferWritePosition] = samples[i];
+            bufferWritePosition = (bufferWritePosition + 1) % bufferSize;
         }
     }
     
@@ -432,7 +516,7 @@ public class AudioManager : MonoBehaviour
     /// </summary>
     public string GetStatusInfo()
     {
-        return $"録音: {isRecording}, マイク: {microphoneDevice ?? "なし"}, サンプリング: {sampleRate}Hz";
+        return $"録音: {isRecording}, マイク: {microphoneDevice ?? "なし"}, サンプリング: {sampleRate}Hz, ストリーミング: {isStreaming}";
     }
     
     #endregion
