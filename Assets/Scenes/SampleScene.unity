@@ -1384,7 +1384,7 @@ PrefabInstance:
       objectReference: {fileID: 9198166244049670055}
     - target: {fileID: 8600748095823823768, guid: 189c9216aea523e098c976165bddb33d, type: 3}
       propertyPath: manualConnectionTest
-      value: 1
+      value: 0
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
