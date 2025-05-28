@@ -6,7 +6,10 @@ dotenv.load_dotenv(dotenv.find_dotenv())
 
 OPENAI_WSS = os.getenv("OPENAI_REALTIME_ENDPOINT")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-HEADERS = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
+HEADERS = {
+    "Authorization": f"Bearer {OPENAI_API_KEY}",
+    "OpenAI-Beta": "realtime=v1"          # ← 追加！
+}
 
 # 環境変数チェック
 if not OPENAI_WSS:
