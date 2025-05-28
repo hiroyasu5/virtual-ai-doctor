@@ -190,4 +190,40 @@ public class VoiceSystemController : MonoBehaviour
             audioManager.OnAudioChunkReady -= OnAudioChunkReady;
         }
     }
+
+    // 一時的なテスト用 - VoiceSystemController に追加
+
+[Header("デバッグ用")]
+[SerializeField] private bool manualConnectionTest = false;
+
+void Update()
+{
+    // 手動接続テスト（Spaceキー）
+    if (manualConnectionTest && Input.GetKeyDown(KeyCode.Space))
+    {
+        if (webSocketManager != null)
+        {
+            if (webSocketManager.IsConnected)
+            {
+                Debug.Log("手動切断実行");
+                _ = webSocketManager.DisconnectFromServer();
+            }
+            else
+            {
+                Debug.Log("手動接続実行");
+                webSocketManager.ConnectToServer();
+            }
+        }
+    }
+    
+    // 接続状態モニタリング
+    if (manualConnectionTest && webSocketManager != null)
+    {
+        string status = webSocketManager.GetConnectionStatus();
+        if (statusText != null && statusText.text != status)
+        {
+            Debug.Log($"接続状態変化: {status}");
+        }
+    }
+}
 }
