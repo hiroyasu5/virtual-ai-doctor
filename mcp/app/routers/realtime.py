@@ -104,6 +104,7 @@ async def relay(ws: WebSocket) -> None:  # noqa: C901
 # -----------------------------------------------------------------------------
 # Task 1: Unity → OpenAI（音声重複防止版）
 # -----------------------------------------------------------------------------
+# mcp/app/routers/realtime.py の _unity_to_openai 関数を修正
 
 async def _unity_to_openai(
     unity_ws: WebSocket, 
@@ -125,14 +126,15 @@ async def _unity_to_openai(
         try:
             samples = struct.unpack(f"{len(pcm)//2}h", pcm)
             max_amplitude = max(abs(s) for s in samples) if samples else 0
-            # より高い閾値で無音を判定
-            if max_amplitude > 500:  # 閾値を上げる
+            # 閾値を下げる（500 → 100）
+            if max_amplitude > 100:  # より敏感に音声を検出
                 has_voice = True
                 logger.debug(f"🎤 音声検出: 振幅 {max_amplitude}")
-        except:
+        except Exception as e:
+            logger.error(f"音声解析エラー: {e}")
             pass
         
-        # バージイン処理
+        # バージイン処理（最初のチャンクでのみ）
         if idx == 0 and assistant_speaking.is_set():
             await openai_ws.send(json.dumps({"type": "response.cancel"}))
             logger.info("🛑 User interrupted - cancelling AI response")
@@ -180,7 +182,6 @@ async def _unity_to_openai(
             idx = 0
             audio_buffer_size = 0
             has_voice = False
-
 # -----------------------------------------------------------------------------
 # Task 2: OpenAI → Unity（応答管理改善版）
 # -----------------------------------------------------------------------------

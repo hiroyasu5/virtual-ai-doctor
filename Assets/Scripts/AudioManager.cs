@@ -33,7 +33,8 @@ public class AudioManager : MonoBehaviour
     private int bufferReadPosition = 0;  // ← これを追加
     private int bufferSize;
     private bool isStreaming = false;
-    
+    private readonly object _streamLock = new object();  // ← これを追加！
+
     // 音声チャンク送信イベント
     public event Action<byte[]> OnAudioChunkReady;
     
@@ -386,7 +387,33 @@ public class AudioManager : MonoBehaviour
     #endregion
     
     #region 音声再生
-    
+    /// <summary>
+/// ストリーミングバッファに音声データを書き込む
+/// </summary>
+/// <param name="samples">書き込む音声サンプル</param>
+private void WriteToStreamingBuffer(float[] samples)
+{
+    lock (_streamLock)
+    {
+        if (audioBuffer == null || audioBuffer.Length == 0)
+        {
+            LogError("音声バッファが初期化されていません");
+            return;
+        }
+
+        int samplesToWrite = samples.Length;
+        int availableSpace = bufferSize;
+
+        // リングバッファへの書き込み
+        for (int i = 0; i < samplesToWrite; i++)
+        {
+            audioBuffer[bufferWritePosition] = samples[i];
+            bufferWritePosition = (bufferWritePosition + 1) % bufferSize;
+        }
+
+        LogDebug($"📝 バッファ書き込み完了: {samplesToWrite} samples, 書き込み位置: {bufferWritePosition}");
+    }
+}
 /// <summary>
 /// 受信した音声データを再生（ストリーミング方式）
 /// </summary>
@@ -584,5 +611,38 @@ private void CheckAudioSystem()
     // Unity全体の音声設定
     LogDebug($"Unity AudioListener Volume: {AudioListener.volume}");
     LogDebug($"Unity AudioListener Pause: {AudioListener.pause}");
+}
+[ContextMenu("Test Microphone Level")]
+private void TestMicrophoneLevel()
+{
+    if (!isRecording)
+    {
+        LogDebug("録音していません。録音を開始してから実行してください。");
+        return;
+    }
+    
+    float[] samples = new float[1000];
+    microphoneClip.GetData(samples, 0);
+    
+    float maxLevel = 0f;
+    float avgLevel = 0f;
+    for (int i = 0; i < samples.Length; i++)
+    {
+        float abs = Mathf.Abs(samples[i]);
+        maxLevel = Mathf.Max(maxLevel, abs);
+        avgLevel += abs;
+    }
+    avgLevel /= samples.Length;
+    
+    // PCM16変換後の値も確認
+    short maxPCM = 0;
+    for (int i = 0; i < samples.Length; i++)
+    {
+        short pcm = (short)(Mathf.Clamp(samples[i], -1.0f, 1.0f) * 32767f);
+        if (Math.Abs(pcm) > Math.Abs(maxPCM))
+            maxPCM = pcm;
+    }
+    
+    LogDebug($"🎤 マイクレベル - 最大: {maxLevel:F4}, 平均: {avgLevel:F4}, 最大PCM値: {maxPCM}");
 }
 }
