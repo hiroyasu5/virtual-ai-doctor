@@ -30,6 +30,7 @@ public class AudioManager : MonoBehaviour
     private AudioClip streamingClip;
     private float[] audioBuffer;
     private int bufferWritePosition = 0;
+    private int bufferReadPosition = 0;  // ← これを追加
     private int bufferSize;
     private bool isStreaming = false;
     
@@ -100,39 +101,43 @@ public class AudioManager : MonoBehaviour
     /// </summary>
     /// <param name="data">出力音声データ</param>
     private void OnAudioRead(float[] data)
+{
+    if (!isStreaming || audioBuffer == null)
     {
-        if (!isStreaming || audioBuffer == null)
-        {
-            // 無音で埋める
-            for (int i = 0; i < data.Length; i++)
-            {
-                data[i] = 0f;
-            }
-            return;
-        }
-        
-        // リングバッファから音声データを読み取り
+        // 無音で埋める
         for (int i = 0; i < data.Length; i++)
         {
-            int readPosition = (bufferWritePosition - data.Length + i + bufferSize) % bufferSize;
-            data[i] = audioBuffer[readPosition];
+            data[i] = 0f;
+        }
+        return;
+    }
+    
+    lock (_streamLock)
+    {
+        // シンプルな読み取り
+        for (int i = 0; i < data.Length; i++)
+        {
+            data[i] = audioBuffer[bufferReadPosition] * 0.3f; // 音量を30%に
+            bufferReadPosition = (bufferReadPosition + 1) % bufferSize;
         }
     }
+}
     
     /// <summary>
     /// ストリーミング開始
     /// </summary>
     private void StartStreaming()
+{
+    if (!isStreaming && streamingClip != null)
     {
-        if (!isStreaming && streamingClip != null)
-        {
-            isStreaming = true;
-            audioSource.clip = streamingClip;
-            audioSource.loop = true;
-            audioSource.Play();
-            LogDebug("ストリーミング音声開始");
-        }
+        isStreaming = true;
+        audioSource.clip = streamingClip;
+        audioSource.loop = true;
+        audioSource.volume = 0.5f;  // ← 音量を50%に
+        audioSource.Play();
+        LogDebug($"ストリーミング音声開始 - SampleRate: {streamingClip.frequency}Hz");
     }
+}
     
     /// <summary>
     /// ストリーミング停止
@@ -382,58 +387,67 @@ public class AudioManager : MonoBehaviour
     
     #region 音声再生
     
-    /// <summary>
-    /// 受信した音声データを再生（ストリーミング方式）
-    /// </summary>
-    public void PlayReceivedAudio(byte[] audioData)
+/// <summary>
+/// 受信した音声データを再生（ストリーミング方式）
+/// </summary>
+public void PlayReceivedAudio(byte[] audioData)
+{
+    if (audioData == null || audioData.Length == 0)
     {
-        if (audioData == null || audioData.Length == 0)
-        {
-            LogDebug("空の音声データは再生しません");
-            return;
-        }
-        
-        try
-        {
-            // PCM16データをfloat配列に変換
-            float[] samples = ConvertFromPCM16(audioData);
-            
-            if (samples.Length == 0)
-            {
-                return;
-            }
-            
-            // ✅ ストリーミングバッファに書き込み
-            WriteToStreamingBuffer(samples);
-            
-            // ストリーミング開始（初回のみ）
-            if (!isStreaming)
-            {
-                StartStreaming();
-            }
-            
-            LogDebug($"音声ストリーミング: {samples.Length} samples, {audioData.Length} bytes");
-        }
-        catch (Exception e)
-        {
-            LogError($"音声재생エラー: {e.Message}");
-        }
+        LogDebug("空の音声データは再生しません");
+        return;
     }
     
-    /// <summary>
-    /// ストリーミングバッファに音声データを書き込み
-    /// </summary>
-    private void WriteToStreamingBuffer(float[] samples)
+    try
     {
-        if (audioBuffer == null || samples == null)
-            return;
-        
-        for (int i = 0; i < samples.Length; i++)
+        // AudioSourceチェック
+        if (audioSource == null)
         {
-            audioBuffer[bufferWritePosition] = samples[i];
-            bufferWritePosition = (bufferWritePosition + 1) % bufferSize;
+            LogError("AudioSourceが設定されていません！");
+            return;
         }
+        
+        // PCM16データをfloat配列に変換
+        float[] samples = ConvertFromPCM16(audioData);
+        
+        if (samples.Length == 0)
+        {
+            LogError("音声変換に失敗しました");
+            return;
+        }
+        
+        // 音声レベルチェック（デバッグ用）
+        float maxAmplitude = 0f;
+        float avgAmplitude = 0f;
+        for (int i = 0; i < Mathf.Min(samples.Length, 1000); i++)
+        {
+            float abs = Mathf.Abs(samples[i]);
+            maxAmplitude = Mathf.Max(maxAmplitude, abs);
+            avgAmplitude += abs;
+        }
+        avgAmplitude /= Mathf.Min(samples.Length, 1000);
+        
+        LogDebug($"📊 音声レベル - 最大: {maxAmplitude:F4}, 平均: {avgAmplitude:F4}, サンプル数: {samples.Length}");
+        
+        // AudioSourceの状態確認
+        LogDebug($"🔊 AudioSource状態 - Volume: {audioSource.volume}, Mute: {audioSource.mute}, isPlaying: {audioSource.isPlaying}");
+        
+        // ✅ ストリーミングバッファに書き込み
+        WriteToStreamingBuffer(samples);
+        
+        // ストリーミング開始（初回のみ）
+        if (!isStreaming)
+        {
+            StartStreaming();
+        }
+        
+        LogDebug($"✅ 音声ストリーミング: {samples.Length} samples, {audioData.Length} bytes");
     }
+    catch (Exception e)
+    {
+        LogError($"音声再生エラー: {e.Message}\nStackTrace: {e.StackTrace}");
+    }
+}
     
     #endregion
     
@@ -520,4 +534,55 @@ public class AudioManager : MonoBehaviour
     }
     
     #endregion
+
+    [ContextMenu("Test Audio Playback")]
+private void TestAudioPlayback()
+{
+    if (audioSource == null)
+    {
+        LogError("AudioSourceが設定されていません！");
+        return;
+    }
+    
+    // AudioSourceの設定を確認
+    audioSource.volume = 1.0f;
+    audioSource.mute = false;
+    
+    // テスト用のサイン波を生成（440Hz、1秒）
+    float[] testSamples = new float[sampleRate];
+    for (int i = 0; i < testSamples.Length; i++)
+    {
+        testSamples[i] = Mathf.Sin(2 * Mathf.PI * 440 * i / (float)sampleRate) * 0.5f;
+    }
+    
+    // PCM16に変換してから再生
+    byte[] testPCM = ConvertToPCM16(testSamples);
+    PlayReceivedAudio(testPCM);
+    
+    LogDebug($"🎵 テスト音声を再生しました（440Hz, 1秒, {testPCM.Length} bytes）");
+}
+
+[ContextMenu("Check Audio System")]
+private void CheckAudioSystem()
+{
+    LogDebug("=== Audio System Check ===");
+    LogDebug($"AudioSource: {(audioSource != null ? "OK" : "NULL")}");
+    
+    if (audioSource != null)
+    {
+        LogDebug($"- Volume: {audioSource.volume}");
+        LogDebug($"- Mute: {audioSource.mute}");
+        LogDebug($"- isPlaying: {audioSource.isPlaying}");
+        LogDebug($"- clip: {(audioSource.clip != null ? audioSource.clip.name : "NULL")}");
+    }
+    
+    LogDebug($"StreamingClip: {(streamingClip != null ? "OK" : "NULL")}");
+    LogDebug($"isStreaming: {isStreaming}");
+    LogDebug($"Sample Rate: {sampleRate}");
+    LogDebug($"Buffer Size: {bufferSize}");
+    
+    // Unity全体の音声設定
+    LogDebug($"Unity AudioListener Volume: {AudioListener.volume}");
+    LogDebug($"Unity AudioListener Pause: {AudioListener.pause}");
+}
 }

@@ -1,12 +1,11 @@
-# mcp/app/routers/realtime.py - 方式B完全実装版（バージイン対応）
+# mcp/app/routers/realtime.py - 方式B最終修正版（音声重複問題解決）
 
 """Unity ⇆ OpenAI Realtime Audio API - 方式B（手動制御＋バージイン）
 ----------------------------------------------------------------
-特徴:
-1. create_response: False で自動応答生成を無効化
-2. 20チャンク（約1秒）ごとに手動でcommit + response.create
-3. バージイン対応: ユーザーが話し始めたらAIの応答をキャンセル
-4. 応答の重複を完全に防止
+修正内容:
+1. 音声重複の防止: response_in_progressフラグで厳密に管理
+2. 空バッファエラーの解消: 無音検出を改善
+3. バージイン改善: 応答キャンセルのタイミング最適化
 """
 
 from __future__ import annotations
@@ -55,7 +54,7 @@ async def relay(ws: WebSocket) -> None:  # noqa: C901
         openai_ws = await websockets.connect(
             url,
             extra_headers=extra_headers,
-            ping_interval=None,   # 🔕 disable websocket‑level ping
+            ping_interval=None,
             ping_timeout=None,
             close_timeout=10,
         )
@@ -79,13 +78,14 @@ async def relay(ws: WebSocket) -> None:  # noqa: C901
         if updated:
             logger.info("✅ session.updated received")
 
-        # 🌟 共有状態: 助手が話しているかどうか
+        # 🌟 共有状態
         assistant_speaking = asyncio.Event()
+        response_in_progress = asyncio.Event()  # 応答生成中フラグ
 
         # --------------------------- start proxy tasks -----------------------
         await asyncio.gather(
-            _unity_to_openai(ws, openai_ws, assistant_speaking),
-            _openai_to_unity(ws, openai_ws, assistant_speaking),
+            _unity_to_openai(ws, openai_ws, assistant_speaking, response_in_progress),
+            _openai_to_unity(ws, openai_ws, assistant_speaking, response_in_progress),
             return_exceptions=True,
         )
 
@@ -102,88 +102,96 @@ async def relay(ws: WebSocket) -> None:  # noqa: C901
         logger.info("session ended: %s", id(ws))
 
 # -----------------------------------------------------------------------------
-# Task 1: Unity → OpenAI（バージイン対応）
+# Task 1: Unity → OpenAI（音声重複防止版）
 # -----------------------------------------------------------------------------
 
 async def _unity_to_openai(
     unity_ws: WebSocket, 
     openai_ws: websockets.WebSocketClientProtocol,
-    assistant_speaking: asyncio.Event
+    assistant_speaking: asyncio.Event,
+    response_in_progress: asyncio.Event
 ) -> None:
-    """PCM16 chunks → base64 & append/commit with barge-in support"""
+    """PCM16 chunks → base64 & append/commit with duplicate prevention"""
     idx = 0
-    user_speaking = False
-    has_active_response = False  # 応答生成中フラグ
-    audio_buffer_size = 0  # バッファサイズ追跡
+    audio_buffer_size = 0
+    has_voice = False  # 実際の音声があるか
     
     async for pcm in unity_ws.iter_bytes():
         if not pcm:
             continue
         
-        # 音声レベルチェック（デバッグ用）
-        if idx == 0:
-            import struct
-            try:
-                samples = struct.unpack(f"{len(pcm)//2}h", pcm)
-                max_amplitude = max(abs(s) for s in samples) if samples else 0
-                if max_amplitude > 100:  # 閾値
-                    logger.debug(f"🎤 音声検出: 振幅 {max_amplitude}")
-            except:
-                pass
+        # 音声レベルチェック（無音検出）
+        import struct
+        try:
+            samples = struct.unpack(f"{len(pcm)//2}h", pcm)
+            max_amplitude = max(abs(s) for s in samples) if samples else 0
+            # より高い閾値で無音を判定
+            if max_amplitude > 500:  # 閾値を上げる
+                has_voice = True
+                logger.debug(f"🎤 音声検出: 振幅 {max_amplitude}")
+        except:
+            pass
         
-        # 🌟 バージイン処理: ユーザーが話し始めた瞬間
+        # バージイン処理
         if idx == 0 and assistant_speaking.is_set():
-            # AIが話している最中なら中断
             await openai_ws.send(json.dumps({"type": "response.cancel"}))
             logger.info("🛑 User interrupted - cancelling AI response")
             assistant_speaking.clear()
-            has_active_response = False
+            response_in_progress.clear()
         
-        idx += 1
-        audio_buffer_size += len(pcm)
-        
-        # 音声データを送信
+        # 音声データを追加
         await openai_ws.send(json.dumps({
             "type": "input_audio_buffer.append",
             "audio": base64.b64encode(pcm).decode(),
         }))
         
-        # 20チャンク（約1秒）ごとにコミット＆応答生成
-        if idx >= 20 and not has_active_response:
-            # バッファサイズチェック
-            logger.info(f"📊 音声バッファサイズ: {audio_buffer_size} bytes ({audio_buffer_size/32000:.2f}秒)")
+        idx += 1
+        audio_buffer_size += len(pcm)
+        
+        # 20チャンク（約1秒）ごとに処理
+        if idx >= 20:
+            logger.info(f"📊 音声バッファ: {audio_buffer_size} bytes, 音声あり: {has_voice}")
             
-            await openai_ws.send(json.dumps({"type": "input_audio_buffer.commit"}))
-            
-            # 既に応答生成中でない場合のみリクエスト
-            if not assistant_speaking.is_set():
-                await openai_ws.send(json.dumps({
-                    "type": "response.create",
-                    "response": {
-                        "modalities": ["audio", "text"],
-                        "instructions": "あなたは親切な医療アシスタントです。簡潔に応答してください。",
-                        "voice": "alloy",  # 明示的に音声指定
-                        "temperature": 0.7,
-                    },
-                }))
-                has_active_response = True
-                logger.info(f"📤 Committed {idx} chunks & requested response")
+            # 音声がある場合のみコミット
+            if has_voice and audio_buffer_size > 3200:  # 2チャンク分以上
+                await openai_ws.send(json.dumps({"type": "input_audio_buffer.commit"}))
+                
+                # 応答生成中でない場合のみリクエスト
+                if not response_in_progress.is_set() and not assistant_speaking.is_set():
+                    response_in_progress.set()  # フラグを立てる
+                    await openai_ws.send(json.dumps({
+                        "type": "response.create",
+                        "response": {
+                            "modalities": ["audio", "text"],
+                            "instructions": "あなたは親切な医療アシスタントです。簡潔に応答してください。",
+                            "voice": "alloy",
+                            "temperature": 0.7,
+                        },
+                    }))
+                    logger.info("📤 応答リクエスト送信")
+                else:
+                    logger.info("📤 コミットのみ（応答生成中）")
             else:
-                logger.info(f"📤 Committed {idx} chunks (response already active)")
+                # 無音の場合はバッファをクリア
+                await openai_ws.send(json.dumps({"type": "input_audio_buffer.clear"}))
+                logger.info("🔇 無音のためバッファクリア")
             
+            # リセット
             idx = 0
             audio_buffer_size = 0
+            has_voice = False
 
 # -----------------------------------------------------------------------------
-# Task 2: OpenAI → Unity
+# Task 2: OpenAI → Unity（応答管理改善版）
 # -----------------------------------------------------------------------------
 
 async def _openai_to_unity(
     unity_ws: WebSocket, 
     openai_ws: websockets.WebSocketClientProtocol,
-    assistant_speaking: asyncio.Event
+    assistant_speaking: asyncio.Event,
+    response_in_progress: asyncio.Event
 ) -> None:
-    """OpenAI events → Unity with speaking state tracking"""
+    """OpenAI events → Unity with improved response management"""
     
     async for m in openai_ws:
         if isinstance(m, str):
@@ -196,18 +204,30 @@ async def _openai_to_unity(
             
             # 音声データの転送
             if t == "response.audio.delta":
-                b64 = d.get("delta", "")
-                if b64:
-                    await unity_ws.send_bytes(base64.b64decode(b64))
-                    # 音声再生開始を記録
-                    if not assistant_speaking.is_set():
-                        assistant_speaking.set()
-                        logger.info("🔊 Assistant started speaking")
+                delta = d.get("delta", "")
+                if delta:
+                    try:
+                        audio_bytes = base64.b64decode(delta)
+                        await unity_ws.send_bytes(audio_bytes)
+                        # 初回の音声データで話し始めを記録
+                        if not assistant_speaking.is_set():
+                            assistant_speaking.set()
+                            logger.info("🔊 Assistant started speaking")
+                            logger.info(f"📤 最初の音声データ送信: {len(audio_bytes)} bytes")
+                    except Exception as e:
+                        logger.error(f"❌ 音声データ送信エラー: {e}")
                         
             # 応答完了
             elif t == "response.done":
                 assistant_speaking.clear()
+                response_in_progress.clear()  # フラグをクリア
                 logger.info("✅ Assistant finished speaking")
+                
+            # 応答キャンセル完了
+            elif t == "response.cancelled":
+                assistant_speaking.clear()
+                response_in_progress.clear()
+                logger.info("❌ Response cancelled")
                 
             # 音声認識結果
             elif t == "conversation.item.input_audio_transcription.completed":
@@ -219,7 +239,7 @@ async def _openai_to_unity(
             elif t == "response.audio_transcript.delta":
                 transcript = d.get("delta", "")
                 if transcript:
-                    logger.info(f"🤖 AI response: {transcript}")
+                    logger.info(f"🤖 AI: {transcript}")
                     
             # 音声検出イベント
             elif t == "input_audio_buffer.speech_started":
@@ -233,11 +253,15 @@ async def _openai_to_unity(
                 
             # エラー
             elif t.startswith("error"):
-                logger.error(f"❌ OpenAI error: {d}")
+                error_code = d.get("error", {}).get("code", "")
+                # 空バッファエラーは無視
+                if error_code != "input_audio_buffer_commit_empty":
+                    logger.error(f"❌ OpenAI error: {d}")
                 
             # デバッグ用
             else:
-                logger.debug(f"📨 OpenAI event: {t}")
+                if t not in ["session.created", "session.updated", "response.created"]:
+                    logger.debug(f"📨 OpenAI event: {t}")
 
 # -----------------------------------------------------------------------------
 # Utilities
@@ -274,9 +298,9 @@ async def health():
     return {
         "status": "healthy",
         "model": MODEL_NAME,
-        "mode": "manual_control",
+        "mode": "manual_control_v2",
         "create_response": "false",
         "barge_in": "enabled",
+        "duplicate_prevention": "enabled",
         "url": get_websocket_url(),
     }
-
